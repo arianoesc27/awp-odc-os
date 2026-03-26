@@ -115,6 +115,9 @@ const float def_FL         = 0.01;
 const float def_FH         = 25.0;
 const float def_FP         = 0.5;
 
+const float def_QPIN       = 2.0f;    // AR: Default is the same as the hardcoded value
+const float def_QSIN       = 0.05f;   // AR: Default is the same as the hardcoded value 
+
 const char  def_INSRC[50]  = "input/FAULTPOW";
 const char  def_INVEL[50]  = "input/media";
 
@@ -125,6 +128,7 @@ const char  def_INSRC_I2[50]  = "input_rst/srcpart/split_faults/fault";
 
 const char  def_CHKFILE[50]   = "output_ckp/CHKP";
 
+// AR: Added float *QPIN and float *QSIN after FP
 void command(int argc,    char **argv,
 	     float *TMAX, float *DH,       float *DT,   float *ARBC,    float *PHT,
              int *NPC,    int *ND,         int *NSRC,   int *NST,       int *NVAR,
@@ -134,7 +138,7 @@ void command(int argc,    char **argv,
              int *NBGX,   int *NEDX,       int *NSKPX,
              int *NBGY,   int *NEDY,       int *NSKPY,
              int *NBGZ,   int *NEDZ,       int *NSKPZ,
-             float *FL,   float *FH,       float *FP,   int *IDYNA,     int *SoCalQ,
+             float *FL,   float *FH,       float *FP,  float *QPIN,    float *QSIN, int *IDYNA,     int *SoCalQ,
              char *INSRC, char *INVEL,     char *OUT,   char *INSRC_I2, char *CHKFILE)
 {
 
@@ -181,6 +185,9 @@ void command(int argc,    char **argv,
    *FL         = def_FL;
    *FH         = def_FH;
    *FP         = def_FP;
+   *QPIN       = def_QPIN; // AR: Inicializing Qp
+   *QSIN       = def_SPIN; // AR: Inicializing Qs
+
 
     strcpy(INSRC, def_INSRC);
     strcpy(INVEL, def_INVEL);
@@ -225,6 +232,8 @@ void command(int argc,    char **argv,
         {"FL", required_argument, NULL, 'l'},
         {"FH", required_argument, NULL, 'h'},
         {"FP", required_argument, NULL, 'p'},
+        {"QPIN", required_argument, NULL, 103},  // AR: Added long option Qp
+        {"QSIN", required_argument, NULL, 104},  // AR: Added long option Qs
         {"NTISKP", required_argument, NULL, 'r'},
         {"WRITE_STEP", required_argument, NULL, 'W'},
         {"INSRC", required_argument, NULL, 100},
@@ -326,6 +335,10 @@ void command(int argc,    char **argv,
                 strcpy(INSRC_I2, optarg); break;
             case 'c':
                 strcpy(CHKFILE, optarg); break;
+            case 103:
+                *QPIN = atof(optarg); break;  // AR: Parsing Qp
+            case 104:
+                *QSIN = atof(optarg); break; // AR: Parsing Qs
             default:
                 printf("Usage: %s \nOptions:\n\t[(-T | --TMAX) <TMAX>]\n\t[(-H | --DH) <DH>]\n\t[(-t | --DT) <DT>]\n\t[(-A | --ARBC) <ARBC>]\n\t[(-P | --PHT) <PHT>]\n\t[(-M | --NPC) <NPC>]\n\t[(-D | --ND) <ND>]\n\t[(-S | --NSRC) <NSRC>]\n\t[(-N | --NST) <NST>]\n",argv[0]);
                 printf("\n\t[(-V | --NVE) <NVE>]\n\t[(-B | --MEDIASTART) <MEDIASTART>]\n\t[(-n | --NVAR) <NVAR>]\n\t[(-I | --IFAULT) <IFAULT>]\n\t[(-R | --READ_STEP) <x READ_STEP for CPU>]\n\t[(-Q | --READ_STEP_GPU) <READ_STEP for GPU>]\n");
@@ -333,6 +346,7 @@ void command(int argc,    char **argv,
                 printf("\n\t[(-1 | --NBGX) <starting point to record in X>]\n\t[(-2 | --NEDX) <ending point to record in X>]\n\t[(-3 | --NSKPX) <skipping points to record in X>]\n\t[(-11 | --NBGY) <starting point to record in Y>]\n\t[(-12 | --NEDY) <ending point to record in Y>]\n\t[(-13 | --NSKPY) <skipping points to record in Y>]\n\t[(-21 | --NBGZ) <starting point to record in Z>]\n\t[(-22 | --NEDZ) <ending point to record in Z>]\n\t[(-23 | --NSKPZ) <skipping points to record in Z>]\n");
                 printf("\n\t[(-i | --IDYNA) <i IDYNA>]\n\t[(-s | --SoCalQ) <s SoCalQ>]\n\t[(-l | --FL) <l FL>]\n\t[(-h | --FH) <i FH>]\n\t[(-p | --FP) <p FP>]\n\t[(-r | --NTISKP) <time skipping in writing>]\n\t[(-W | --WRITE_STEP) <time aggregation in writing>]\n");
                 printf("\n\t[(-100 | --INSRC) <source file>]\n\t[(-101 | --INVEL) <mesh file>]\n\t[(-o | --OUT) <output file>]\n\t[(-102 | --INSRC_I2) <split source file prefix (IFAULT=2)>]\n\t[(-c | --CHKFILE) <checkpoint file to write statistics>]\n\n");
+                printf("\n\t[--QPIN <constant Qp when NVAR=3 and NVE=1>]\n\t[--QSIN <constant Qs when NVAR=3 and NVE=1>]\n"); // AR: Qp and Qs
                 exit(-1);
         }
     }

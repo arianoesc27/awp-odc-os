@@ -17,7 +17,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include "pmcl3d.h"
 
 void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D qs, float *taumax, float *taumin,
-             int nvar, float FP,  float FL, float FH, int nxt, int nyt, int nzt, int PX, int PY, int NX, int NY,
+             int nvar, float FP,  float FL, float QPIN, float QSIN, float FH, int nxt, int nyt, int nzt, int PX, int PY, int NX, int NY,
              int NZ, int *coords, MPI_Comm MCW, int IDYNA, int NVE, int SoCalQ, char *INVEL,
              float *vse, float *vpe, float *dde)
 {
@@ -169,12 +169,29 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
       if(nvar==3 && NVE==1)
       {
         for(i=0;i<nxt;i++)
-          for(j=0;j<nyt;j++){
+          for(j=0;j<nyt;j++)
             for(k=0;k<nzt;k++){
-                 tmpsq[i][j][k]=0.05*tmpvs[i][j][k];
-                 tmppq[i][j][k]=2.0*tmpsq[i][j][k];
+                if(QPIN > 0.0f && QSIN > 0.0f){
+                    // AR: Added this lines so Qp and Qs are not hardcoded and can be passed as input parameters
+                    tmpsq[i][j][k] = QSIN * tmpvs[i][j][k];
+                    tmppq[i][j][k] = QPIN * tmpsq[i][j][k];
+                }
+                else{
+                    // comportamiento antiguo por defecto
+                    tmpsq[i][j][k] = 0.05f * tmpvs[i][j][k];
+                    tmppq[i][j][k] = 2.0f  * tmpsq[i][j][k];
+                }
             }
-          }
+      }
+
+      if(nvar==3 && NVE==1)
+      {
+        if(QSIN <= 0.0f || QPIN <= 0.0f)
+        {
+          if(rank==0)
+            printf("ERROR: QSIN and QPIN must be > 0 when NVAR=3 and NVE=1\n");
+          MPI_Abort(MCW, 2);
+        }
       }
 
       float w0=0.0f, ww1=0.0f, w2=0.0f, tmp1=0.0f, tmp2=0.0f;

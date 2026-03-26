@@ -69,7 +69,7 @@ int main(int argc,char **argv)
     int   NBGX, NEDX, NSKPX, NBGY, NEDY, NSKPY, NBGZ, NEDZ, NSKPZ;
     int   nxt, nyt, nzt;
     MPI_Offset displacement;
-    float FL, FH, FP;
+    float FL, FH, FP, QPIN, QSIN;
     char  INSRC[50], INVEL[50], OUT[50], INSRC_I2[50], CHKFILE[50];
     double GFLOPS = 1.0;
     double GFLOPS_SUM = 0.0;
@@ -187,7 +187,7 @@ int main(int argc,char **argv)
       &NVAR,&NVE,&MEDIASTART,&IFAULT,&READ_STEP,&READ_STEP_GPU,
       &NTISKP,&WRITE_STEP,&NX,&NY,&NZ,&PX,&PY,
       &NBGX,&NEDX,&NSKPX,&NBGY,&NEDY,&NSKPY,&NBGZ,&NEDZ,&NSKPZ,
-      &FL,&FH,&FP,&IDYNA,&SoCalQ,INSRC,INVEL,OUT,INSRC_I2,CHKFILE);
+      &FL,&FH,&FP,&QPIN,&QSIN,&IDYNA,&SoCalQ,INSRC,INVEL,OUT,INSRC_I2,CHKFILE);
 
     sprintf(filenamebasex,"%s/SX",OUT);
     sprintf(filenamebasey,"%s/SY",OUT);
@@ -411,13 +411,13 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     }
 
     if(rank==0) printf("Before inimesh\n");
-    inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, FP, FL, FH,
+    inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, FP, FL, FH, QPIN, QSIN,
             nxt, nyt, nzt, PX, PY, NX, NY, NZ, coord, MCW, IDYNA, NVE, SoCalQ, INVEL,
             vse, vpe, dde);
     if(rank==0) printf("After inimesh\n");
     if(rank==0)
       writeCHK(CHKFILE, NTISKP, DT, DH, nxt, nyt, nzt,
-        nt, ARBC, NPC, NVE, FL, FH, FP, vse, vpe, dde);
+        nt, ARBC, NPC, NVE, FL, FH, FP, QPIN, QSIN, vse, vpe, dde);
 
     mediaswap(d1, mu, lam, qp, qs, rank, x_rank_L, x_rank_R, y_rank_F, y_rank_B, nxt, nyt, nzt, MCW);
 
