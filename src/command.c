@@ -186,7 +186,7 @@ void command(int argc,    char **argv,
    *FH         = def_FH;
    *FP         = def_FP;
    *QPIN       = def_QPIN; // AR: Inicializing Qp
-   *QSIN       = def_SPIN; // AR: Inicializing Qs
+   *QSIN       = def_QSIN; // AR: Inicializing Qs
 
 
     strcpy(INSRC, def_INSRC);
@@ -338,7 +338,7 @@ void command(int argc,    char **argv,
             case 103:
                 *QPIN = atof(optarg); break;  // AR: Parsing Qp
             case 104:
-                *QSIN = atof(optarg); break; // AR: Parsing Qs
+                *QSIN = atof(optarg); break;  // AR: Parsing Qs
             default:
                 printf("Usage: %s \nOptions:\n\t[(-T | --TMAX) <TMAX>]\n\t[(-H | --DH) <DH>]\n\t[(-t | --DT) <DT>]\n\t[(-A | --ARBC) <ARBC>]\n\t[(-P | --PHT) <PHT>]\n\t[(-M | --NPC) <NPC>]\n\t[(-D | --ND) <ND>]\n\t[(-S | --NSRC) <NSRC>]\n\t[(-N | --NST) <NST>]\n",argv[0]);
                 printf("\n\t[(-V | --NVE) <NVE>]\n\t[(-B | --MEDIASTART) <MEDIASTART>]\n\t[(-n | --NVAR) <NVAR>]\n\t[(-I | --IFAULT) <IFAULT>]\n\t[(-R | --READ_STEP) <x READ_STEP for CPU>]\n\t[(-Q | --READ_STEP_GPU) <READ_STEP for GPU>]\n");
