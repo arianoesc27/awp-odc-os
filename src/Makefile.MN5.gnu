@@ -26,7 +26,7 @@
 
 CUDA_HOME = $(subst bin/nvcc,,$(shell which nvcc))
 
-CC 	= cc
+CC 	= mpicc
 CFLAGS	= -O3 -g
 GFLAGS	= $(CUDA_HOME)bin/nvcc -use_fast_math -arch=sm_90
 
