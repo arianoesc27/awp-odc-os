@@ -232,8 +232,8 @@ void command(int argc,    char **argv,
         {"FL", required_argument, NULL, 'l'},
         {"FH", required_argument, NULL, 'h'},
         {"FP", required_argument, NULL, 'p'},
-        {"QPIN", required_argument, NULL, 103},  // AR: Added long option Qp
-        {"QSIN", required_argument, NULL, 104},  // AR: Added long option Qs
+        {"QPIN", required_argument, NULL, 1001},  // AR: Added long option Qp
+        {"QSIN", required_argument, NULL, 1002},  // AR: Added long option Qs
         {"NTISKP", required_argument, NULL, 'r'},
         {"WRITE_STEP", required_argument, NULL, 'W'},
         {"INSRC", required_argument, NULL, 100},
@@ -335,9 +335,9 @@ void command(int argc,    char **argv,
                 strcpy(INSRC_I2, optarg); break;
             case 'c':
                 strcpy(CHKFILE, optarg); break;
-            case 103:
+            case 1001:
                 *QPIN = atof(optarg); break;  // AR: Parsing Qp
-            case 104:
+            case 1002:
                 *QSIN = atof(optarg); break;  // AR: Parsing Qs
             default:
                 printf("Usage: %s \nOptions:\n\t[(-T | --TMAX) <TMAX>]\n\t[(-H | --DH) <DH>]\n\t[(-t | --DT) <DT>]\n\t[(-A | --ARBC) <ARBC>]\n\t[(-P | --PHT) <PHT>]\n\t[(-M | --NPC) <NPC>]\n\t[(-D | --ND) <ND>]\n\t[(-S | --NSRC) <NSRC>]\n\t[(-N | --NST) <NST>]\n",argv[0]);
