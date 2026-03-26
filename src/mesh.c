@@ -17,7 +17,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include "pmcl3d.h"
 
 void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D qs, float *taumax, float *taumin,
-             int nvar, float FP,  float FL, float QPIN, float QSIN, float FH, int nxt, int nyt, int nzt, int PX, int PY, int NX, int NY,
+             int nvar, int QMODE, float FP,  float FL, float FH, float QPIN, float QSIN, int nxt, int nyt, int nzt, int PX, int PY, int NX, int NY,
              int NZ, int *coords, MPI_Comm MCW, int IDYNA, int NVE, int SoCalQ, char *INVEL,
              float *vse, float *vpe, float *dde)
 {
@@ -29,6 +29,8 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
   MPI_Datatype readtype;
   MPI_Status   filestatus;
   MPI_File     fh;
+
+  MPI_Comm_rank(MCW, &rank);
 
   pi      = 4.*atan(1.);
   if(MEDIASTART==0)
@@ -150,9 +152,19 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
               	tmpvp[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset];
               	tmpvs[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+1];
                	tmpdd[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+2];
-              	if(nvar>3){
-                	tmppq[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+3];
-                	tmpsq[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+4];
+
+                /*
+                 * CAMBIO:
+                 * Antes esto estaba bajo if(nvar>3), pero tmppq/tmpsq sólo
+                 * existen cuando NVE==1. En modo elástico (NVE==0), si nvar>3
+                 * se podía escribir sobre punteros NULL.
+                 *
+                 * Con este guard, el camino anelástico queda igual y el
+                 * elástico no toca arreglos Q.
+                 */
+                if(nvar>3 && NVE==1){
+                    tmppq[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+3];
+                    tmpsq[i][j][k]=tmpta[(k*nyt*nxt+j*nxt+i)*nvar+var_offset+4];
                 }
                 /*if(tmpvp[i][j][k]!=tmpvp[i][j][k] ||
                     tmpvs[i][j][k]!=tmpvs[i][j][k] ||
@@ -171,15 +183,25 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
         for(i=0;i<nxt;i++)
           for(j=0;j<nyt;j++)
             for(k=0;k<nzt;k++){
-                if(QPIN > 0.0f && QSIN > 0.0f){
-                    // AR: Added this lines so Qp and Qs are not hardcoded and can be passed as input parameters
+                if(QMODE == 0)
+                {
+                    // Q given as scale factors
+                    // Qs = QSIN * Vs
+                    // Qp = QPIN * Qs
                     tmpsq[i][j][k] = QSIN * tmpvs[i][j][k];
                     tmppq[i][j][k] = QPIN * tmpsq[i][j][k];
                 }
-                else{
-                    // Defaut: old behavior
-                    tmpsq[i][j][k] = 0.05f * tmpvs[i][j][k];
-                    tmppq[i][j][k] = 2.0f  * tmpsq[i][j][k];
+                else if(QMODE == 1)
+                {
+                    // Q given as absolute values
+                    tmpsq[i][j][k] = QSIN;
+                    tmppq[i][j][k] = QPIN;
+                }
+                else
+                {
+                    if(rank==0)
+                        printf("ERROR: invalid QMODE=%d. Use 0=scale or 1=absolute\n", QMODE);
+                    MPI_Abort(MCW, 2);
                 }
             }
       }
@@ -217,9 +239,27 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
         for(j=0;j<nyt;j++)
           for(k=0;k<nzt;k++)
           {
-             tmpvs[i][j][k] = tmpvs[i][j][k]*(1+ ( log(w2/w0) )/(pi*tmpsq[i][j][k]) );
-             tmpvp[i][j][k] = tmpvp[i][j][k]*(1+ ( log(w2/w0) )/(pi*tmppq[i][j][k]) );
-             if (SoCalQ==1)
+
+
+             /*
+              * CAMBIO:
+              * Estas correcciones dependen de w0, w2, tmppq y tmpsq, que sólo
+              * son válidos en anelasticidad (NVE==1).
+              *
+              * Antes se ejecutaban siempre y en NVE==0 podían producir acceso
+              * inválido a tmppq/tmpsq o divisiones usando parámetros Q no
+              * inicializados para el camino elástico.
+              *
+              * Así no se altera NVE==1 y NVE==0 conserva vp/vs tal como vienen
+              * del modelo, antes de los clamps físicos siguientes.
+              */
+             if(NVE==1)
+             {
+                tmpvs[i][j][k] = tmpvs[i][j][k]*(1+ ( log(w2/w0) )/(pi*tmpsq[i][j][k]) );
+                tmpvp[i][j][k] = tmpvp[i][j][k]*(1+ ( log(w2/w0) )/(pi*tmppq[i][j][k]) );
+             }
+
+            if (SoCalQ==1)
              {
                 vpvs=tmpvp[i][j][k]/tmpvs[i][j][k];
                 if (vpvs<1.45)  tmpvs[i][j][k]=tmpvp[i][j][k]/1.45;

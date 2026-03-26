@@ -115,6 +115,7 @@ const float def_FL         = 0.01;
 const float def_FH         = 25.0;
 const float def_FP         = 0.5;
 
+const int def_QMODE = 0;              // AR: 0 = scale, 1 = absolute
 const float def_QPIN       = 2.0f;    // AR: Default is the same as the hardcoded value
 const float def_QSIN       = 0.05f;   // AR: Default is the same as the hardcoded value 
 
@@ -138,7 +139,7 @@ void command(int argc,    char **argv,
              int *NBGX,   int *NEDX,       int *NSKPX,
              int *NBGY,   int *NEDY,       int *NSKPY,
              int *NBGZ,   int *NEDZ,       int *NSKPZ,
-             float *FL,   float *FH,       float *FP,  float *QPIN,    float *QSIN, int *IDYNA,     int *SoCalQ,
+             int *QMODE, float *FL,   float *FH,       float *FP,  float *QPIN,    float *QSIN, int *IDYNA,     int *SoCalQ,
              char *INSRC, char *INVEL,     char *OUT,   char *INSRC_I2, char *CHKFILE)
 {
 
@@ -185,8 +186,9 @@ void command(int argc,    char **argv,
    *FL         = def_FL;
    *FH         = def_FH;
    *FP         = def_FP;
-   *QPIN       = def_QPIN; // AR: Inicializing Qp
-   *QSIN       = def_QSIN; // AR: Inicializing Qs
+   *QMODE       = def_QMODE; // AR: Inicializing Q
+   *QPIN       = def_QPIN;   // AR: Inicializing Qp
+   *QSIN       = def_QSIN;   // AR: Inicializing Qs
 
 
     strcpy(INSRC, def_INSRC);
@@ -232,6 +234,7 @@ void command(int argc,    char **argv,
         {"FL", required_argument, NULL, 'l'},
         {"FH", required_argument, NULL, 'h'},
         {"FP", required_argument, NULL, 'p'},
+        {"QMODE", required_argument, NULL, 1000}, // AR: Added long option Q
         {"QPIN", required_argument, NULL, 1001},  // AR: Added long option Qp
         {"QSIN", required_argument, NULL, 1002},  // AR: Added long option Qs
         {"NTISKP", required_argument, NULL, 'r'},
@@ -335,10 +338,12 @@ void command(int argc,    char **argv,
                 strcpy(INSRC_I2, optarg); break;
             case 'c':
                 strcpy(CHKFILE, optarg); break;
+            case 1000:
+                *QMODE = atoi(optarg); break;
             case 1001:
-                *QPIN = atof(optarg); break;  // AR: Parsing Qp
+                *QPIN = atof(optarg); break;
             case 1002:
-                *QSIN = atof(optarg); break;  // AR: Parsing Qs
+                *QSIN = atof(optarg); break;
             default:
                 printf("Usage: %s \nOptions:\n\t[(-T | --TMAX) <TMAX>]\n\t[(-H | --DH) <DH>]\n\t[(-t | --DT) <DT>]\n\t[(-A | --ARBC) <ARBC>]\n\t[(-P | --PHT) <PHT>]\n\t[(-M | --NPC) <NPC>]\n\t[(-D | --ND) <ND>]\n\t[(-S | --NSRC) <NSRC>]\n\t[(-N | --NST) <NST>]\n",argv[0]);
                 printf("\n\t[(-V | --NVE) <NVE>]\n\t[(-B | --MEDIASTART) <MEDIASTART>]\n\t[(-n | --NVAR) <NVAR>]\n\t[(-I | --IFAULT) <IFAULT>]\n\t[(-R | --READ_STEP) <x READ_STEP for CPU>]\n\t[(-Q | --READ_STEP_GPU) <READ_STEP for GPU>]\n");

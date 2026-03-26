@@ -21,7 +21,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 int writeCHK(char *chkfile, int ntiskp, float dt, float dh,
       int nxt, int nyt, int nzt,
       int nt, float arbc, int npc, int nve,
-      float fl, float fh, float fp, float qpscale, float qsscale,
+      int qmode, float fl, float fh, float fp, float qpscale, float qsscale,
       float *vse, float *vpe, float *dde){
 
   FILE *fchk;
@@ -42,6 +42,10 @@ int writeCHK(char *chkfile, int ntiskp, float dt, float dh,
   fprintf(fchk,"SKIP OF SEISMOGRAMS IN TIME (LOOP COUNTER):\t%d\n",ntiskp);
   fprintf(fchk,"ABC CONDITION, PML=1 OR CERJAN=0:\t%d\n",npc);
   fprintf(fchk,"FD SCHEME, VISCO=1 OR ELASTIC=0:\t%d\n",nve);
+  if(qmode == 0)
+      fprintf(fchk,"Q interpretation:\tQs=QSIN*Vs, Qp=QPIN*Qs\n");
+  else if(qmode == 1)
+      fprintf(fchk,"Q interpretation:\tQs=QSIN, Qp=QPIN\n");
   fprintf(fchk,"Q, FL,FP,FH:\t%f, %f, %f\n",fl,fp,fh);
   fprintf(fchk,"QPIN/QSIN:\t%f,\t%f\n", qpscale, qsscale);
   fclose(fchk);

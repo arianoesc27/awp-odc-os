@@ -12,6 +12,68 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// -----------------------------------------------------------------------------
+// AR NOTE: Support for both anelastic (NVE=1) and elastic (NVE=0) runs using Cerjan BC 
+// with NVAR=3 velocity models, plus user-configurable Q input.
+//
+// Original behavior:
+// - For NVAR=3 and NVE=1, the code used hardcoded attenuation relations:
+//       Qs = 0.05 * Vs
+//       Qp = 2.0  * Qs
+// - For NVE=0, several auxiliary viscoelastic arrays were not allocated,
+//   even though some routines still expected valid pointers to them.
+//   This caused segmentation faults in elastic runs.
+//
+// Changes introduced here:
+//
+// 1) User-configurable Q input for NVAR=3 anelastic runs
+//    A new QMODE flag controls how QPIN and QSIN are interpreted:
+//
+//    QMODE = 0  -> QPIN and QSIN are scale factors
+//                  Qs = QSIN * Vs
+//                  Qp = QPIN * Qs
+//
+//    QMODE = 1  -> QPIN and QSIN are absolute Q values
+//                  Qs = QSIN
+//                  Qp = QPIN
+//
+//    Default values preserve the original code behavior:
+//        QSIN = 0.05
+//        QPIN = 2.0
+//        QMODE = 0
+//
+// 2) Q-related terms are only physically applied in the anelastic case
+//    The Q formulation above is only used when:
+//        NVAR == 3 && NVE == 1
+//
+//    For elastic runs (NVE=0), qp and qs are not used to construct
+//    attenuation physics.
+//
+// 3) Elastic-mode compatibility patch
+//    To prevent segmentation faults in NVE=0 runs, the auxiliary arrays
+//    required by existing communication / GPU logic are now allocated in
+//    both modes, even if they are only physically meaningful for NVE=1.
+//
+//    In particular, for NVE=0 the following arrays are allocated and
+//    initialized to zero as dummy arrays:
+//        qp, qs
+//        vx1, vx2
+//        r1, r2, r3, r4, r5, r6
+//
+//    This keeps the code memory-safe while allowing the existing GPU stress
+//    kernel and exchange routines to operate without invalid pointers.
+//
+// 4) Shared kernel strategy for elastic mode
+//    The current GPU implementation reuses the same stress kernel for both
+//    NVE=1 and NVE=0. In the elastic case, the viscoelastic contribution is
+//    suppressed by keeping the auxiliary Q- and memory-related arrays equal
+//    to zero.
+//
+// Result:
+// - NVE=1 keeps the original anelastic functionality, now with configurable Q
+// - NVE=0 can run without segmentation faults in the current GPU workflow
+// -----------------------------------------------------------------------------
+
 #include <sys/time.h>
 #include <time.h>
 #include <stdio.h>
@@ -69,6 +131,7 @@ int main(int argc,char **argv)
     int   NBGX, NEDX, NSKPX, NBGY, NEDY, NSKPY, NBGZ, NEDZ, NSKPZ;
     int   nxt, nyt, nzt;
     MPI_Offset displacement;
+    int QMODE;
     float FL, FH, FP, QPIN, QSIN;
     char  INSRC[50], INVEL[50], OUT[50], INSRC_I2[50], CHKFILE[50];
     double GFLOPS = 1.0;
@@ -160,7 +223,7 @@ int main(int argc,char **argv)
     float* SB_vel;     // Velocity to be Sent to   Back  in y direction (u1,v1,w1)
     float* RF_vel;     // Velocity to be Recv from Front in y direction (u1,v1,w1)
     float* RB_vel;     // Velocity to be Recv from Back  in y direction (u1,v1,w1)
-//  variable definition ends
+  //  variable definition ends
 
     int tmpSize;
     int WRITE_STEP;
@@ -187,7 +250,7 @@ int main(int argc,char **argv)
       &NVAR,&NVE,&MEDIASTART,&IFAULT,&READ_STEP,&READ_STEP_GPU,
       &NTISKP,&WRITE_STEP,&NX,&NY,&NZ,&PX,&PY,
       &NBGX,&NEDX,&NSKPX,&NBGY,&NEDY,&NSKPY,&NBGZ,&NEDZ,&NSKPZ,
-      &FL,&FH,&FP,&QPIN,&QSIN,&IDYNA,&SoCalQ,INSRC,INVEL,OUT,INSRC_I2,CHKFILE);
+      &QMODE, &FL,&FH,&FP,&QPIN,&QSIN,&IDYNA,&SoCalQ,INSRC,INVEL,OUT,INSRC_I2,CHKFILE);
 
     sprintf(filenamebasex,"%s/SX",OUT);
     sprintf(filenamebasey,"%s/SY",OUT);
@@ -399,11 +462,6 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
        cudaMemcpy(d_tpsrc,tpsrc,num_bytes,cudaMemcpyHostToDevice);
     }
 
-    d1     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    mu     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    lam    = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    lam_mu = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, 1);
-
     // AR: qp and qs must be allocated and initialized even when NVE==0.
     // They are not used physically in the elastic case, but they still need
     // to exist as valid arrays to avoid segmentation faults.
@@ -418,6 +476,18 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     // and initialized to zero as dummy arrays. This prevents invalid memory
     // access while preserving the correct elastic physics.
 
+    // AR: Initialize material arrays to zero before mesh loading.
+    //
+    // inimesh() is expected to overwrite the physically relevant entries,
+    // but zero initialization makes the code safer during debugging and
+    // prevents accidental use of uninitialized values in partially filled
+    // regions or boundary layers.
+
+    d1     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    mu     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    lam    = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    lam_mu = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, 1);
+
     qp = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     qs = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
 
@@ -425,18 +495,29 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
       for(j=0;j<nyt+4+8*loop;j++)
         for(k=0;k<nzt+2*align;k++)
         {
+          d1[i][j][k] = 0.0f;
+          mu[i][j][k] = 0.0f;
+          lam[i][j][k] = 0.0f;
           qp[i][j][k] = 0.0f;
           qs[i][j][k] = 0.0f;
         }
 
+    // AR: Initialize lam_mu to zero before computing the free-surface auxiliary coefficient.
+    // Only the required index range is filled afterwards, so zeroing the
+    // full array avoids undefined values outside the actively used region.
+
+    for(i=0;i<nxt+4+8*loop;i++)
+      for(j=0;j<nyt+4+8*loop;j++)
+        lam_mu[i][j][0] = 0.0f;    
+
     if(rank==0) printf("Before inimesh\n");
-    inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, FP, FL, FH, QPIN, QSIN,
+    inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, QMODE, FP, FL, FH, QPIN, QSIN,
             nxt, nyt, nzt, PX, PY, NX, NY, NZ, coord, MCW, IDYNA, NVE, SoCalQ, INVEL,
             vse, vpe, dde);
     if(rank==0) printf("After inimesh\n");
     if(rank==0)
       writeCHK(CHKFILE, NTISKP, DT, DH, nxt, nyt, nzt,
-        nt, ARBC, NPC, NVE, FL, FH, FP, QPIN, QSIN, vse, vpe, dde);
+        nt, ARBC, NPC, NVE, QMODE, FL, FH, FP, QPIN, QSIN, vse, vpe, dde);
 
     mediaswap(d1, mu, lam, qp, qs, rank, x_rank_L, x_rank_R, y_rank_F, y_rank_B, nxt, nyt, nzt, MCW);
 
@@ -453,8 +534,25 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     cudaMalloc((void**)&d_lam_mu, num_bytes);
     cudaMemcpy(d_lam_mu,&lam_mu[0][0][0],num_bytes,cudaMemcpyHostToDevice);
 
+  // AR: Allocate and initialize vx1 and vx2 for both anelastic and elastic runs.
+  // In the anelastic case (NVE==1), these arrays are filled through the
+  // tau-based viscoelastic initialization.
+  // In the elastic case (NVE==0), they remain zero so that the same stress
+  // kernel can be used in its elastic-degenerate form without reading
+  // uninitialized memory.
+
     vx1  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     vx2  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+
+    for(i=0;i<nxt+4+8*loop;i++)
+      for(j=0;j<nyt+4+8*loop;j++)
+        for(k=0;k<nzt+2*align;k++)
+        {
+          vx1[i][j][k] = 0.0f;
+          vx2[i][j][k] = 0.0f;
+        }
+
+
     if(NPC==0)
     {
 	dcrjx = Alloc1D(nxt+4+8*loop);
@@ -533,15 +631,40 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     xy  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     yz  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     xz  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    if(NVE==1)
-    {
-        r1  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-        r2  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-        r3  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-        r4  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-        r5  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-        r6  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    }
+
+    for(i=0;i<nxt+4+8*loop;i++)
+      for(j=0;j<nyt+4+8*loop;j++)
+        for(k=0;k<nzt+2*align;k++)
+        {
+          u1[i][j][k] = 0.0f;
+          v1[i][j][k] = 0.0f;
+          w1[i][j][k] = 0.0f;
+          xx[i][j][k] = 0.0f;
+          yy[i][j][k] = 0.0f;
+          zz[i][j][k] = 0.0f;
+          xy[i][j][k] = 0.0f;
+          yz[i][j][k] = 0.0f;
+          xz[i][j][k] = 0.0f;
+        }
+
+    r1  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    r2  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    r3  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    r4  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    r5  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    r6  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+
+    for(i=0;i<nxt+4+8*loop;i++)
+      for(j=0;j<nyt+4+8*loop;j++)
+        for(k=0;k<nzt+2*align;k++)
+        {
+          r1[i][j][k] = 0.0f;
+          r2[i][j][k] = 0.0f;
+          r3[i][j][k] = 0.0f;
+          r4[i][j][k] = 0.0f;
+          r5[i][j][k] = 0.0f;
+          r6[i][j][k] = 0.0f;
+        }
 
     source_step = 1;
     if(rank==srcproc)
@@ -570,22 +693,22 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     cudaMemcpy(d_xz,&xz[0][0][0],num_bytes,cudaMemcpyHostToDevice);
     cudaMalloc((void**)&d_yz, num_bytes);
     cudaMemcpy(d_yz,&yz[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    if(NVE==1)
-    {
-      if(rank==0) printf("Allocate additional device pointers (r) and copy.\n");
-    	cudaMalloc((void**)&d_r1, num_bytes);
-    	cudaMemcpy(d_r1,&r1[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    	cudaMalloc((void**)&d_r2, num_bytes);
-    	cudaMemcpy(d_r2,&r2[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    	cudaMalloc((void**)&d_r3, num_bytes);
-    	cudaMemcpy(d_r3,&r3[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    	cudaMalloc((void**)&d_r4, num_bytes);
-    	cudaMemcpy(d_r4,&r4[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    	cudaMalloc((void**)&d_r5, num_bytes);
-    	cudaMemcpy(d_r5,&r5[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    	cudaMalloc((void**)&d_r6, num_bytes);
-    	cudaMemcpy(d_r6,&r6[0][0][0],num_bytes,cudaMemcpyHostToDevice);
-    }
+
+    
+    if(rank==0) printf("Allocate additional device pointers (r) and copy.\n");
+    cudaMalloc((void**)&d_r1, num_bytes);
+    cudaMemcpy(d_r1,&r1[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_r2, num_bytes);
+    cudaMemcpy(d_r2,&r2[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_r3, num_bytes);
+    cudaMemcpy(d_r3,&r3[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_r4, num_bytes);
+    cudaMemcpy(d_r4,&r4[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_r5, num_bytes);
+    cudaMemcpy(d_r5,&r5[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_r6, num_bytes);
+    cudaMemcpy(d_r6,&r6[0][0][0],num_bytes,cudaMemcpyHostToDevice);
+
 //  variable initialization ends
     if(rank==0) printf("Allocate buffers of #elements: %d\n",rec_nxt*rec_nyt*rec_nzt*WRITE_STEP);
     Bufx  = Alloc1D(rec_nxt*rec_nyt*rec_nzt*WRITE_STEP);
@@ -617,8 +740,21 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
 
     if(rank==0)
       fchk = fopen(CHKFILE,"a+");
+
+
+// AR: Allow the main Cerjan time-stepping loop to run for both anelastic and elastic cases.
+// Previously this branch was restricted to NVE==1, which prevented
+// elastic runs from entering the main computational loop.
+// With the auxiliary arrays now safely allocated and zero-initialized,
+// the same loop can be used for NVE==0 as well.
+
+// AR: Reuse the existing viscoelastic stress kernel dstrqc_H() for elastic runs as well.
+// In the elastic case, qp=qs=0, vx1=vx2=0, and r1-r6=0, so all
+// viscoelastic memory terms collapse to zero and the kernel reduces
+// to an elastic update without requiring a separate elastic GPU kernel.
+
 //  Main Loop Starts
-    if(NPC==0 && NVE==1)
+    if(NPC==0)
     {
        time_un  -= gethrtime();
        //This loop has no loverlapping because there is source input
@@ -886,7 +1022,7 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     MPI_Allreduce( &GFLOPS, &GFLOPS_SUM, 1, MPI_DOUBLE, MPI_SUM, MCW );
     if(rank==0)
     {
-        printf("GPU benchmark size NX=%d, NY=%d, NZ=%d, ReadStep=%d\n", NX, NY, NZ, READ_STEP);
+      printf("GPU benchmark size NX=%d, NY=%d, NZ=%d, ReadStep=%d\n", NX, NY, NZ, READ_STEP);
     	printf("GPU computing flops=%1.18f GFLOPS, time = %1.18f secs per timestep\n", GFLOPS_SUM, time_un);
     }
 //  Main Loop Ends
@@ -922,26 +1058,27 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     cudaFree(d_vx1);
     cudaFree(d_vx2);
 
-    if(NVE==1)
-    {
-       Delloc3D(r1);
-       Delloc3D(r2);
-       Delloc3D(r3);
-       Delloc3D(r4);
-       Delloc3D(r5);
-       Delloc3D(r6);
-       cudaFree(d_r1);
-       cudaFree(d_r2);
-       cudaFree(d_r3);
-       cudaFree(d_r4);
-       cudaFree(d_r5);
-       cudaFree(d_r6);
+    // AR: Free the memory allocated to r1 to r6
+    Delloc3D(r1);
+    Delloc3D(r2);
+    Delloc3D(r3);
+    Delloc3D(r4);
+    Delloc3D(r5);
+    Delloc3D(r6);
+    cudaFree(d_r1);
+    cudaFree(d_r2);
+    cudaFree(d_r3);
+    cudaFree(d_r4);
+    cudaFree(d_r5);
+    cudaFree(d_r6);
 
-       Delloc3D(qp);
-       Delloc3D(qs);
-       cudaFree(d_qp);
-       cudaFree(d_qs);
-    }
+
+    // AR: Free the memory allocated for Qp and Qs. This was previously done inside
+    // if (NVE == 1), but it has been moved outside to allow the elastic case to run.
+    Delloc3D(qp);
+    Delloc3D(qs);
+    cudaFree(d_qp);
+    cudaFree(d_qs);
 
     if(NPC==0)
     {

@@ -24,6 +24,15 @@
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ##
 
+## AR: Compilation instructions for MN5 acc node
+# module purge
+# module load gcc
+# module load impi
+# module load cuda
+# module unload darshan
+# make -f Makefile.MN5.gnu clean
+# make -f Makefile.MN5.gnu
+
 CUDA_HOME = $(subst bin/nvcc,,$(shell which nvcc))
 
 CC 	= mpicc
