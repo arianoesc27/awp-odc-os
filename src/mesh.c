@@ -177,7 +177,7 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
                     tmppq[i][j][k] = QPIN * tmpsq[i][j][k];
                 }
                 else{
-                    // comportamiento antiguo por defecto
+                    // Defaut: old behavior
                     tmpsq[i][j][k] = 0.05f * tmpvs[i][j][k];
                     tmppq[i][j][k] = 2.0f  * tmpsq[i][j][k];
                 }

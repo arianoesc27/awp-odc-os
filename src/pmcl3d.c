@@ -404,11 +404,30 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     lam    = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     lam_mu = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, 1);
 
-    if(NVE==1)
-    {
-       qp   = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-       qs   = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
-    }
+    // AR: qp and qs must be allocated and initialized even when NVE==0.
+    // They are not used physically in the elastic case, but they still need
+    // to exist as valid arrays to avoid segmentation faults.
+    //
+    // Reason:
+    // - pmcl3d.c originally allocates qp/qs only when NVE==1
+    // - however, the code still passes qp/qs to inimesh() and mediaswap()
+    //   regardless of NVE
+    // - mediaswap() and later GPU copies expect valid pointers
+    //
+    // Therefore, in the elastic case (NVE==0), qp and qs are kept allocated
+    // and initialized to zero as dummy arrays. This prevents invalid memory
+    // access while preserving the correct elastic physics.
+
+    qp = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+    qs = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
+
+    for(i=0;i<nxt+4+8*loop;i++)
+      for(j=0;j<nyt+4+8*loop;j++)
+        for(k=0;k<nzt+2*align;k++)
+        {
+          qp[i][j][k] = 0.0f;
+          qs[i][j][k] = 0.0f;
+        }
 
     if(rank==0) printf("Before inimesh\n");
     inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, FP, FL, FH, QPIN, QSIN,
