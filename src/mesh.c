@@ -21,6 +21,7 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
              int NZ, int *coords, MPI_Comm MCW, int IDYNA, int NVE, int SoCalQ, char *INVEL,
              float *vse, float *vpe, float *dde)
 {
+  
   int merr;
   int rank;
   int i,j,k,err;
@@ -30,7 +31,11 @@ void inimesh(int MEDIASTART, Grid3D d1, Grid3D mu, Grid3D lam, Grid3D qp, Grid3D
   MPI_Status   filestatus;
   MPI_File     fh;
 
-  MPI_Comm_rank(MCW, &rank);
+  //AR: Checkpoint 
+  //MPI_Comm_rank(MCW, &rank);
+  //fprintf(stderr, "rank=%d enter inimesh MEDIASTART=%d NVE=%d nvar=%d\n",
+  //      rank, MEDIASTART, NVE, nvar);
+  //fflush(stderr);
 
   pi      = 4.*atan(1.);
   if(MEDIASTART==0)

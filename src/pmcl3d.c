@@ -483,38 +483,37 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     // prevents accidental use of uninitialized values in partially filled
     // regions or boundary layers.
 
+    // AR: Allocate material arrays.
+    // They are filled later by inimesh(), so no full zero-fill is needed here.
     d1     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     mu     = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     lam    = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     lam_mu = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, 1);
 
+    // AR: qp/qs must exist in both modes because inimesh(), mediaswap(),
+    // host->device copies, and the shared stress kernel still expect valid pointers.
     qp = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     qs = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
 
-    for(i=0;i<nxt+4+8*loop;i++)
-      for(j=0;j<nyt+4+8*loop;j++)
+    // AR: Elastic-mode compatibility:
+    // only zero the dummy attenuation arrays in NVE==0.
+    // In NVE==1, qp/qs are built by inimesh().
+
+    if (NVE == 0) {
+      for(i=0;i<nxt+4+8*loop;i++)
+          for(j=0;j<nyt+4+8*loop;j++)
         for(k=0;k<nzt+2*align;k++)
         {
-          d1[i][j][k] = 0.0f;
-          mu[i][j][k] = 0.0f;
-          lam[i][j][k] = 0.0f;
           qp[i][j][k] = 0.0f;
           qs[i][j][k] = 0.0f;
         }
+    }	
 
-    // AR: Initialize lam_mu to zero before computing the free-surface auxiliary coefficient.
-    // Only the required index range is filled afterwards, so zeroing the
-    // full array avoids undefined values outside the actively used region.
-
-    for(i=0;i<nxt+4+8*loop;i++)
-      for(j=0;j<nyt+4+8*loop;j++)
-        lam_mu[i][j][0] = 0.0f;    
-
-    if(rank==0) printf("Before inimesh\n");
+    if(rank==0) printf("Before inimesh\n"); fflush(stdout);
     inimesh(MEDIASTART, d1, mu, lam, qp, qs, &taumax, &taumin, NVAR, QMODE, FP, FL, FH, QPIN, QSIN,
             nxt, nyt, nzt, PX, PY, NX, NY, NZ, coord, MCW, IDYNA, NVE, SoCalQ, INVEL,
             vse, vpe, dde);
-    if(rank==0) printf("After inimesh\n");
+    if(rank==0) printf("After inimesh\n"); fflush(stdout);
     if(rank==0)
       writeCHK(CHKFILE, NTISKP, DT, DH, nxt, nyt, nzt,
         nt, ARBC, NPC, NVE, QMODE, FL, FH, FP, QPIN, QSIN, vse, vpe, dde);
@@ -535,23 +534,24 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     cudaMemcpy(d_lam_mu,&lam_mu[0][0][0],num_bytes,cudaMemcpyHostToDevice);
 
   // AR: Allocate and initialize vx1 and vx2 for both anelastic and elastic runs.
-  // In the anelastic case (NVE==1), these arrays are filled through the
-  // tau-based viscoelastic initialization.
-  // In the elastic case (NVE==0), they remain zero so that the same stress
+  // In the anelastic case (NVE==1) they are allocated 
+  // In the elastic case (NVE==0), these arrays are zero-filled through the
+  // tau-based viscoelastic initialization. they remain zero so that the same stress
   // kernel can be used in its elastic-degenerate form without reading
   // uninitialized memory.
 
     vx1  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     vx2  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
 
-    for(i=0;i<nxt+4+8*loop;i++)
-      for(j=0;j<nyt+4+8*loop;j++)
-        for(k=0;k<nzt+2*align;k++)
-        {
-          vx1[i][j][k] = 0.0f;
-          vx2[i][j][k] = 0.0f;
-        }
-
+    if (NVE == 0) {
+      for(i=0;i<nxt+4+8*loop;i++)
+        for(j=0;j<nyt+4+8*loop;j++)
+          for(k=0;k<nzt+2*align;k++)
+          {
+            vx1[i][j][k] = 0.0f;
+            vx2[i][j][k] = 0.0f;
+          }
+    }
 
     if(NPC==0)
     {
@@ -654,18 +654,20 @@ rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
     r5  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
     r6  = Alloc3D(nxt+4+8*loop, nyt+4+8*loop, nzt+2*align);
 
-    for(i=0;i<nxt+4+8*loop;i++)
-      for(j=0;j<nyt+4+8*loop;j++)
-        for(k=0;k<nzt+2*align;k++)
-        {
-          r1[i][j][k] = 0.0f;
-          r2[i][j][k] = 0.0f;
-          r3[i][j][k] = 0.0f;
-          r4[i][j][k] = 0.0f;
-          r5[i][j][k] = 0.0f;
-          r6[i][j][k] = 0.0f;
-        }
-
+  // AR: zero-filled initialization of r1 to r6
+    if (NVE == 0) {
+      for(i=0;i<nxt+4+8*loop;i++)
+        for(j=0;j<nyt+4+8*loop;j++)
+          for(k=0;k<nzt+2*align;k++)
+          {
+            r1[i][j][k] = 0.0f;
+            r2[i][j][k] = 0.0f;
+            r3[i][j][k] = 0.0f;
+            r4[i][j][k] = 0.0f;
+            r5[i][j][k] = 0.0f;
+            r6[i][j][k] = 0.0f;
+          }
+    }
     source_step = 1;
     if(rank==srcproc)
     {
