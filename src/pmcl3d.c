@@ -1136,6 +1136,15 @@ void calcRecordingPoints(int *rec_nbgx, int *rec_nedx,
 
   *displacement = 0;
 
+  //AR: Inicitialize rec_nbgx/rec_nedx, rec_nbgy/rec_nedy, and rec_nbgz/rec_nedz, because later
+  // buffer-fill loops still use these indices. If they remain uninitialized,
+  // they may contain garbage values and cause out-of-bounds access or
+  // segmentation faults on ranks with no recording contribution.
+  *rec_nbgx = *rec_nedx = 0;
+  *rec_nbgy = *rec_nedy = 0;
+  *rec_nbgz = *rec_nedz = 0;
+  *rec_nxt  = *rec_nyt  = *rec_nzt  = 0;
+
   if(NBGX > nxt*(coord[0]+1))     *rec_nxt = 0;
   else if(NEDX < nxt*coord[0]+1)  *rec_nxt = 0;
   else{
@@ -1175,10 +1184,24 @@ void calcRecordingPoints(int *rec_nbgx, int *rec_nedx,
     *rec_nzt = (*rec_nedz-*rec_nbgz)/NSKPZ+1;
   }
 
+  // AR: If this rank does not intersect the requested recording box,
+  // reset both the local recording sizes and the local recording index bounds.
+  // Otherwise, stale/uninitialized rec_nbg*/rec_ned* values may be used later
+  // in the output loops, leading to invalid memory access on ranks with
+  // zero recording points, and resulting in segmentation fault. 
   if(*rec_nxt == 0 || *rec_nyt == 0 || *rec_nzt == 0){
     *rec_nxt = 0;
     *rec_nyt = 0;
     *rec_nzt = 0;
+
+    *rec_nbgx = 0;
+    *rec_nedx = 0;
+    *rec_nbgy = 0;
+    *rec_nedy = 0;
+    *rec_nbgz = 0;
+    *rec_nedz = 0;
+
+    *displacement = 0;
   }
 
   // displacement assumes NPZ=1!
