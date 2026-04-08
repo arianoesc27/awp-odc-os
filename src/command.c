@@ -90,6 +90,7 @@ const int   def_READ_STEP_GPU = 2500;
 
 const int   def_NTISKP     = 25;
 const int   def_WRITE_STEP = 100;
+const int   def_NGPU_PER_NODE = 4; //AR: setting default to configuration of MN5
 
 const int   def_NX         = 3500;
 const int   def_NY         = 2500;
@@ -130,11 +131,12 @@ const char  def_INSRC_I2[50]  = "input_rst/srcpart/split_faults/fault";
 const char  def_CHKFILE[50]   = "output_ckp/CHKP";
 
 // AR: Added float *QPIN and float *QSIN after FP
+// AR: Added NGPU_PER_NODE as I noticed that the value is hardcoded to 3
 void command(int argc,    char **argv,
 	     float *TMAX, float *DH,       float *DT,   float *ARBC,    float *PHT,
              int *NPC,    int *ND,         int *NSRC,   int *NST,       int *NVAR,
              int *NVE,    int *MEDIASTART, int *IFAULT, int *READ_STEP, int *READ_STEP_GPU,
-             int *NTISKP, int *WRITE_STEP,
+             int *NTISKP, int *WRITE_STEP, int *NGPU_PER_NODE,
     	       int *NX,     int *NY,         int *NZ,     int *PX,        int *PY,
              int *NBGX,   int *NEDX,       int *NSKPX,
              int *NBGY,   int *NEDY,       int *NSKPY,
@@ -164,6 +166,7 @@ void command(int argc,    char **argv,
 
    *NTISKP     = def_NTISKP;
    *WRITE_STEP = def_WRITE_STEP;
+   *NGPU_PER_NODE = def_NGPU_PER_NODE;
 
    *NX         = def_NX;
    *NY         = def_NY;
@@ -239,6 +242,7 @@ void command(int argc,    char **argv,
         {"QSIN", required_argument, NULL, 1002},  // AR: Added long option Qs
         {"NTISKP", required_argument, NULL, 'r'},
         {"WRITE_STEP", required_argument, NULL, 'W'},
+        {"NGPU_PER_NODE", required_argument, NULL, 1003}, // AR: Added long option for number of GPUs per node
         {"INSRC", required_argument, NULL, 100},
         {"INVEL", required_argument, NULL, 101},
         {"OUT", required_argument, NULL, 'o'},
@@ -327,6 +331,8 @@ void command(int argc,    char **argv,
                 *NTISKP     = atoi(optarg); break;
             case 'W':
                 *WRITE_STEP = atoi(optarg); break;
+            case 1003:
+                *NGPU_PER_NODE = atoi(optarg); break;
             case 100:
                 insrcIsSet = 1;
                 strcpy(INSRC, optarg); break;
@@ -352,6 +358,7 @@ void command(int argc,    char **argv,
                 printf("\n\t[(-i | --IDYNA) <i IDYNA>]\n\t[(-s | --SoCalQ) <s SoCalQ>]\n\t[(-l | --FL) <l FL>]\n\t[(-h | --FH) <i FH>]\n\t[(-p | --FP) <p FP>]\n\t[(-r | --NTISKP) <time skipping in writing>]\n\t[(-W | --WRITE_STEP) <time aggregation in writing>]\n");
                 printf("\n\t[(-100 | --INSRC) <source file>]\n\t[(-101 | --INVEL) <mesh file>]\n\t[(-o | --OUT) <output file>]\n\t[(-102 | --INSRC_I2) <split source file prefix (IFAULT=2)>]\n\t[(-c | --CHKFILE) <checkpoint file to write statistics>]\n\n");
                 printf("\n\t[--QPIN <constant Qp when NVAR=3 and NVE=1>]\n\t[--QSIN <constant Qs when NVAR=3 and NVE=1>]\n"); // AR: Qp and Qs
+                printf("\n\t[(--NGPU_PER_NODE) <GPUs per node>]\n");
                 exit(-1);
         }
     }

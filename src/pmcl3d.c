@@ -228,6 +228,11 @@ int main(int argc,char **argv)
     int tmpSize;
     int WRITE_STEP;
     int NTISKP;
+    // AR: variables for GPU configuration
+    int NGPU_PER_NODE;
+    int local_rank = -1;
+    char *local_rank_str = NULL;
+
     int rec_NX;
     int rec_NY;
     int rec_NZ;
@@ -248,7 +253,7 @@ int main(int argc,char **argv)
 //  variable initialization begins
     command(argc,argv,&TMAX,&DH,&DT,&ARBC,&PHT,&NPC,&ND,&NSRC,&NST,
       &NVAR,&NVE,&MEDIASTART,&IFAULT,&READ_STEP,&READ_STEP_GPU,
-      &NTISKP,&WRITE_STEP,&NX,&NY,&NZ,&PX,&PY,
+      &NTISKP,&WRITE_STEP,&NGPU_PER_NODE,&NX,&NY,&NZ,&PX,&PY,
       &NBGX,&NEDX,&NSKPX,&NBGY,&NEDY,&NSKPY,&NBGZ,&NEDZ,&NSKPZ,
       &QMODE, &FL,&FH,&FP,&QPIN,&QSIN,&IDYNA,&SoCalQ,INSRC,INVEL,OUT,INSRC_I2,CHKFILE);
 
@@ -310,14 +315,59 @@ int main(int argc,char **argv)
             y_rank_B = -1;
     }
 
-    // Below line is only for HPGPU4 machine!
-    rank_gpu = rank%3;
-    // Below line is for 1 GPU/node systems
-    //rank_gpu = 0;
+    // AR: Old GPU mapping logic kept here for reference.
+    // ------------------------------------------------------------
+    // This mapping used the global MPI rank and was machine-specific.
+    // `rank_gpu = rank % 3` was only valid for the old HPGPU4 setup. 
+    // In that case it is assumed that the correct distribution was across 3 GPUs
+    // It is not correct for MN5, where GPU assignment should be based
+    // on the MPI rank local to each node and the number of GPUs per node.
+    // `rank_gpu = 0` was only valid for 1-GPU-per-node systems.
+    // ------------------------------------------------------------
+    // rank_gpu = rank % 3;
+    // rank_gpu = 0;  AR: this line was commented and was for a machine with 1 GPU 
+    // cudaSetDevice(rank_gpu);
+
+    // AR: Assign one GPU to each MPI task using the rank inside the node,
+    // not the global MPI rank.
+    //
+    // The old version used mappings like rank%3, which only worked for a
+    // specific machine setup. Here we use the local rank so the GPU
+    // assignment matches the GPUs available on each node.
+    //
+    // The GPU is selected with:
+    //   rank_gpu = local_rank % NGPU_PER_NODE
+    // This is better than using the global MPI rank because the old
+    // rank%3 mapping only worked on one specific machine. With local_rank
+    // and NGPU_PER_NODE, the code can work correctly on systems with
+    // different numbers of GPUs per node.
+    if ((local_rank_str = getenv("SLURM_LOCALID")) != NULL) {
+        local_rank = atoi(local_rank_str);
+    }
+    else if ((local_rank_str = getenv("PMI_LOCAL_RANK")) != NULL) {
+        local_rank = atoi(local_rank_str);
+    }
+    else if ((local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK")) != NULL) {
+        local_rank = atoi(local_rank_str);
+    }
+    else if ((local_rank_str = getenv("MV2_COMM_WORLD_LOCAL_RANK")) != NULL) {
+        local_rank = atoi(local_rank_str);
+    }
+    else {
+        if (rank == 0) {
+            printf("ERROR: could not determine local MPI rank on node.\n");
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
+    rank_gpu = local_rank % NGPU_PER_NODE;
     cudaSetDevice(rank_gpu);
 
-printf("\n\nrank=%d) RS=%d, RSG=%d, NST=%d, IF=%d\n\n\n",
-rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
+    printf("rank=%d local_rank=%d NGPU_PER_NODE=%d -> gpu=%d\n",
+          rank, local_rank, NGPU_PER_NODE, rank_gpu);
+
+    printf("\n\nrank=%d) RS=%d, RSG=%d, NST=%d, IF=%d\n\n\n",
+    rank, READ_STEP, READ_STEP_GPU, NST, IFAULT);
 
     // same for each processor:
     if(NEDX==-1) NEDX = NX;
